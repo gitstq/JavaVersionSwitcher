@@ -1,0 +1,2 @@
+E:\VS\java版本切换\JavaVersionSwitcher\bin\Release\net10.0-windows\win-x64\publish\JavaVersionSwitcher.pdb
+E:\VS\java版本切换\JavaVersionSwitcher\bin\Release\net10.0-windows\win-x64\publish\JavaVersionSwitcher.exe
