@@ -1,11 +1,12 @@
-# Visual Studio and .NET project ignores
-## Build results
+# Visual Studio 和 .NET 项目忽略配置
+
+## 编译生成结果 (无需提交的大文件，如 dll, exe)
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
 [Bb]uild/
 
-## IDE specific files/folders
+## IDE 特定的个人配置文件/缓存 (如 Visual Studio 或 VS Code 的本地设置)
 .vs/
 .vscode/
 *.user
@@ -15,7 +16,7 @@
 *.cache
 *.swp
 
-## OS generated files
+## 操作系统生成的隐藏文件 (如缩略图缓存、macOS特有的系统文件等)
 .DS_Store
 .DS_Store?
 ._*
@@ -24,13 +25,32 @@
 ehthumbs.db
 Thumbs.db
 
-## Test results
+
+
+## 单元测试生成的结果和构建日志
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
 
-## Packages
+## 第三方依赖包文件 (如通过 NuGet 下载的包，不需要提交到代码库)
 *.nupkg
 packages/
 
-## Log files
+## 运行日志文件
 *.log
+
+## Trae IDE 及其他编辑器特定的个人缓存与配置
+.trae/
+.idea/
+*.DotSettings.user
+*.rsuser
+
+## 发布与发布配置文件 (通常包含敏感或本地特定的发布路径)
+[Pp]ublish/
+*.Publish.xml
+*.pubxml
+*.pubxml.user
+
+## 本地机密文件与本地环境变量 (防止意外提交账号密码)
+appsettings.local.json
+appsettings.Development.json
+secrets.json
