@@ -212,9 +212,6 @@ public partial class MainWindow : Window
                 string currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? string.Empty;
                 string newPath = UpdatePathWithJavaHome(currentPath, javaPath);
                 Environment.SetEnvironmentVariable("PATH", newPath, EnvironmentVariableTarget.Machine);
-                
-                // 刷新当前进程的环境变量
-                RefreshEnvironmentVariables();
             });
             
             // 立即更新UI显示
@@ -453,6 +450,12 @@ public partial class MainWindow : Window
     {
         await SwitchJavaVersionAsync("Java25");
     }
+
+    private void BtnBroadcastEnvironment_Click(object sender, RoutedEventArgs e)
+    {
+        RefreshEnvironmentVariables();
+        MessageBox.Show("已广播环境变量变更通知。", "操作成功", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
     
 
     
@@ -556,6 +559,7 @@ public partial class MainWindow : Window
         BtnJava11.IsEnabled = isEnabled;
         BtnJava17.IsEnabled = isEnabled;
         BtnJava25.IsEnabled = isEnabled;
+        BtnBroadcastEnvironment.IsEnabled = isEnabled;
     }
 
     private static string GetJavaExecutablePath(string javaHome)

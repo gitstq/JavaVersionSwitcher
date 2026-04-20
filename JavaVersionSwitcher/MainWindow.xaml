@@ -168,7 +168,12 @@
                     <Button x:Name="BtnJava17" Content="Java17" Style="{StaticResource PrimaryButtonStyle}" Click="BtnJava17_Click" Grid.Row="1" Grid.Column="1" Margin="0,0,8,8"/>
                     <Button x:Name="BtnJava25" Content="Java25" Style="{StaticResource PrimaryButtonStyle}" Click="BtnJava25_Click" Grid.Row="1" Grid.Column="2" Margin="0,0,0,8"/>
                 </Grid>
-                
+
+                <Button x:Name="BtnBroadcastEnvironment"
+                        Content="广播环境变量"
+                        Style="{StaticResource SecondaryButtonStyle}"
+                        Click="BtnBroadcastEnvironment_Click"
+                        Margin="0,8,0,0"/>
 
             </StackPanel>
         </Border>
