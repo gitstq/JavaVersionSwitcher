@@ -1,0 +1,36 @@
+# Visual Studio and .NET project ignores
+## Build results
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Bb]uild/
+
+## IDE specific files/folders
+.vs/
+.vscode/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+*.cache
+*.swp
+
+## OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+## Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+
+## Packages
+*.nupkg
+packages/
+
+## Log files
+*.log
