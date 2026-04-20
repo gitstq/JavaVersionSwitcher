@@ -25,8 +25,6 @@
 ehthumbs.db
 Thumbs.db
 
-
-
 ## 单元测试生成的结果和构建日志
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
@@ -54,3 +52,11 @@ packages/
 appsettings.local.json
 appsettings.Development.json
 secrets.json
+
+## 项目特定的本地配置文件 (包含本机特定的 Java 路径)
+java-paths.json
+
+## 本地 .NET 和 NuGet 缓存与临时文件
+.dotnet/
+.dotnet-cli/
+.nuget-appdata/
