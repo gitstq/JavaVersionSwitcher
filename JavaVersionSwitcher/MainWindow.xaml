@@ -6,7 +6,7 @@
         xmlns:local="clr-namespace:JavaVersionSwitcher"
         mc:Ignorable="d"
         Title="Java版本切换工具"
-        Height="480"
+        Height="450"
         Width="500"
         WindowStyle="SingleBorderWindow"
         ResizeMode="CanMinimize"
@@ -175,7 +175,7 @@
         
         <!-- 底部信息 -->
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,0" VerticalAlignment="Center">
-            <TextBlock Text="© 2025 Java版本切换工具" FontSize="12" Foreground="#6B7280"/>
+            <TextBlock Text="© 2026 Java版本切换工具 by:琦琦" FontSize="12" Foreground="#6B7280"/>
         </StackPanel>
     </Grid>
 </Window>
