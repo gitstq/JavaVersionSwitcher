@@ -21,6 +21,9 @@ namespace JavaVersionSwitcher;
 /// </summary>
 public partial class MainWindow : Window
 {
+    private bool _isSwitching;
+    private Window? _switchingDialog;
+
     private static readonly string[] JavaProcessNames =
     {
         "java",
@@ -175,10 +178,18 @@ public partial class MainWindow : Window
     // 切换Java版本
     private async Task SwitchJavaVersionAsync(string versionName)
     {
+        if (_isSwitching)
+        {
+            return;
+        }
+
         try
         {
+            BeginSwitchingUi(versionName);
+
             if (!JavaVersionPaths.TryGetValue(versionName, out string? javaPath))
             {
+                EndSwitchingUi();
                 MessageBox.Show($"未找到 {versionName} 的路径配置。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
@@ -187,6 +198,7 @@ public partial class MainWindow : Window
                 await RunEnvironmentPrecheckAsync(versionName, javaPath));
             if (!precheckResult.IsSuccess)
             {
+                EndSwitchingUi();
                 MessageBox.Show(precheckResult.Message, precheckResult.Title, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
@@ -210,12 +222,18 @@ public partial class MainWindow : Window
             UpdateButtonStates(versionName);
             
             // 显示成功消息
+            EndSwitchingUi();
             MessageBox.Show($"成功切换到{versionName}", "切换成功", MessageBoxButton.OK, MessageBoxImage.Information);
             
         }
         catch (Exception ex)
         {
+            EndSwitchingUi();
             MessageBox.Show($"切换失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            EndSwitchingUi();
         }
     }
 
@@ -327,6 +345,82 @@ public partial class MainWindow : Window
         {
             MessageBox.Show($"刷新环境变量失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+
+    private void BeginSwitchingUi(string versionName)
+    {
+        _isSwitching = true;
+        SetVersionButtonsEnabled(false);
+        Cursor = Cursors.Wait;
+
+        _switchingDialog = CreateSwitchingDialog(versionName);
+        _switchingDialog.Show();
+    }
+
+    private void EndSwitchingUi()
+    {
+        _isSwitching = false;
+        _switchingDialog?.Close();
+        _switchingDialog = null;
+        SetVersionButtonsEnabled(true);
+        Cursor = null;
+    }
+
+    private Window CreateSwitchingDialog(string versionName)
+    {
+        Window dialog = new Window
+        {
+            Owner = this,
+            Title = "正在切换",
+            Width = 320,
+            Height = 150,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            WindowStyle = WindowStyle.ToolWindow,
+            ShowInTaskbar = false,
+            Topmost = true,
+            Background = Brushes.White,
+            Content = new StackPanel
+            {
+                Margin = new Thickness(20),
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"正在切换到 {versionName}",
+                        FontSize = 16,
+                        FontWeight = FontWeights.SemiBold,
+                        Foreground = Brushes.Black,
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        Margin = new Thickness(0, 0, 0, 12)
+                    },
+                    new ProgressBar
+                    {
+                        IsIndeterminate = true,
+                        Height = 16,
+                        Margin = new Thickness(0, 0, 0, 12)
+                    },
+                    new TextBlock
+                    {
+                        Text = "请等待切换完成，期间无法点击其他版本按钮。",
+                        FontSize = 12,
+                        Foreground = Brushes.DimGray,
+                        TextAlignment = TextAlignment.Center,
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                }
+            }
+        };
+
+        dialog.Closing += (_, e) =>
+        {
+            if (_isSwitching)
+            {
+                e.Cancel = true;
+            }
+        };
+
+        return dialog;
     }
     
     // 按钮点击事件
@@ -452,6 +546,16 @@ public partial class MainWindow : Window
         BtnJava11.Style = (Style)FindResource("PrimaryButtonStyle");
         BtnJava17.Style = (Style)FindResource("PrimaryButtonStyle");
         BtnJava25.Style = (Style)FindResource("PrimaryButtonStyle");
+    }
+
+    private void SetVersionButtonsEnabled(bool isEnabled)
+    {
+        BtnJava7.IsEnabled = isEnabled;
+        BtnJava8_32.IsEnabled = isEnabled;
+        BtnJava8.IsEnabled = isEnabled;
+        BtnJava11.IsEnabled = isEnabled;
+        BtnJava17.IsEnabled = isEnabled;
+        BtnJava25.IsEnabled = isEnabled;
     }
 
     private static string GetJavaExecutablePath(string javaHome)
