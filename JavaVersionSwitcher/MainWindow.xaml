@@ -133,9 +133,9 @@
                 <TextBlock Text="当前Java版本状态" FontSize="16" FontWeight="600" Foreground="#1F2937" Margin="0,0,0,12"/>
                 
                 <!-- 只显示当前Java版本 -->
-                <StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
                     <TextBlock Text="当前Java版本: " FontSize="14" Foreground="#4B5563"/>
-                    <TextBlock x:Name="CurrentJavaVersion" FontSize="14" FontWeight="600" Foreground="#3B82F6" Margin="0,2,0,0"/>
+                    <TextBlock x:Name="CurrentJavaVersion" FontSize="14" FontWeight="600" Foreground="#3B82F6" Margin="4,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
             </StackPanel>
         </Border>

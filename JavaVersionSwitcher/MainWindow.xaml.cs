@@ -48,21 +48,33 @@ public partial class MainWindow : Window
         Loaded += MainWindow_Loaded;
     }
     
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        CheckCurrentJavaVersion();
+        await CheckCurrentJavaVersionAsync();
     }
     
-    // 检查当前Java版本（直接根据JAVA_HOME路径判断，不执行java.exe）
-    private void CheckCurrentJavaVersion()
+    // 检查当前Java版本（通过执行 java -version 获取真实版本，并结合 JAVA_HOME）
+    private async Task CheckCurrentJavaVersionAsync()
     {
         try
         {
             // 获取系统环境变量中的JAVA_HOME
             string javaHome = Environment.GetEnvironmentVariable("JAVA_HOME", EnvironmentVariableTarget.Machine) ?? string.Empty;
             
-            // 直接根据JAVA_HOME路径匹配版本名称
-            string displayVersion = GetJavaVersionFromPath(javaHome);
+            // 尝试执行 java -version 获取真实生效版本
+            string rawVersion = await GetActualJavaVersionAsync();
+            string displayVersion = "未检测到Java";
+
+            if (!string.IsNullOrEmpty(rawVersion))
+            {
+                // 如果能成功执行 java -version，则使用映射逻辑
+                displayVersion = MapJavaVersionWithPath(rawVersion, javaHome);
+            }
+            else
+            {
+                // 如果 java -version 执行失败，降级使用 JAVA_HOME 判断
+                displayVersion = GetJavaVersionFromPath(javaHome);
+            }
             
             // 更新UI
             CurrentJavaVersion.Text = displayVersion;
@@ -84,21 +96,57 @@ public partial class MainWindow : Window
             MessageBox.Show($"检测Java版本失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+
+    // 异步执行 java -version 并提取版本号
+    private async Task<string> GetActualJavaVersionAsync()
+    {
+        try
+        {
+            using Process process = new Process();
+            process.StartInfo.FileName = "java";
+            process.StartInfo.Arguments = "-version";
+            process.StartInfo.UseShellExecute = false;
+            process.StartInfo.RedirectStandardError = true; // java -version 输出在 stderr
+            process.StartInfo.CreateNoWindow = true;
+            process.Start();
+
+            string output = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            if (!string.IsNullOrWhiteSpace(output))
+            {
+                // 匹配 java version "17.0.12" 或 openjdk version "11.0.2"
+                var match = System.Text.RegularExpressions.Regex.Match(output, @"(?:java|openjdk) version ""([^""]+)""");
+                if (match.Success)
+                {
+                    return match.Groups[1].Value;
+                }
+            }
+        }
+        catch
+        {
+            // 执行失败（如环境变量未配置 java）
+        }
+        return string.Empty;
+    }
     
     // 根据JAVA_HOME路径获取Java版本名称
     private string GetJavaVersionFromPath(string javaHome)
     {
+        string normalizedJavaHome = javaHome?.TrimEnd('\\', '/') ?? string.Empty;
+        
         // 查找匹配的版本路径
         foreach (var kvp in JavaVersionPaths)
         {
-            if (javaHome.Equals(kvp.Value, StringComparison.OrdinalIgnoreCase))
+            string normalizedPath = kvp.Value.TrimEnd('\\', '/');
+            if (normalizedJavaHome.Equals(normalizedPath, StringComparison.OrdinalIgnoreCase))
             {
                 return kvp.Key;
             }
         }
         
         // 如果没有匹配的路径，返回默认信息
-        return string.IsNullOrEmpty(javaHome) ? "未检测到Java" : javaHome;
+        return string.IsNullOrEmpty(normalizedJavaHome) ? "未检测到Java" : javaHome;
     }
     
     // 切换Java版本
