@@ -52,7 +52,7 @@ public partial class MainWindow : Window
         {"Java8", "D:\\java\\jdk-8"},
         {"Java11", "D:\\java\\jdk-11.0.2"},
         {"Java17", "D:\\java\\jdk-17.0.12"},
-        {"Java25", "D:\\java\\jdk-25.0.1"}
+        {"Java25", "D:\\java\\jdk-25.0.2"}
     };
     
     // Java版本映射：将java -version输出映射到按钮名称
@@ -183,23 +183,27 @@ public partial class MainWindow : Window
                 return;
             }
 
-            EnvironmentPrecheckResult precheckResult = await RunEnvironmentPrecheckAsync(versionName, javaPath);
+            EnvironmentPrecheckResult precheckResult = await Task.Run(async () =>
+                await RunEnvironmentPrecheckAsync(versionName, javaPath));
             if (!precheckResult.IsSuccess)
             {
                 MessageBox.Show(precheckResult.Message, precheckResult.Title, MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
             
-            // 立即更新JAVA_HOME
-            Environment.SetEnvironmentVariable("JAVA_HOME", javaPath, EnvironmentVariableTarget.Machine);
-            
-            // 立即更新PATH，确保Java bin目录在PATH中
-            string currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? string.Empty;
-            string newPath = UpdatePathWithJavaHome(currentPath, javaPath);
-            Environment.SetEnvironmentVariable("PATH", newPath, EnvironmentVariableTarget.Machine);
-            
-            // 刷新当前进程的环境变量
-            RefreshEnvironmentVariables();
+            await Task.Run(() =>
+            {
+                // 立即更新JAVA_HOME
+                Environment.SetEnvironmentVariable("JAVA_HOME", javaPath, EnvironmentVariableTarget.Machine);
+                
+                // 立即更新PATH，确保Java bin目录在PATH中
+                string currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? string.Empty;
+                string newPath = UpdatePathWithJavaHome(currentPath, javaPath);
+                Environment.SetEnvironmentVariable("PATH", newPath, EnvironmentVariableTarget.Machine);
+                
+                // 刷新当前进程的环境变量
+                RefreshEnvironmentVariables();
+            });
             
             // 立即更新UI显示
             CurrentJavaVersion.Text = versionName;
