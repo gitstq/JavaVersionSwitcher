@@ -21,6 +21,29 @@ namespace JavaVersionSwitcher;
 /// </summary>
 public partial class MainWindow : Window
 {
+    private static readonly string[] JavaProcessNames =
+    {
+        "java",
+        "javaw",
+        "javac"
+    };
+
+    private static readonly string[] IdeAndBuildToolProcessNames =
+    {
+        "idea64",
+        "idea",
+        "studio64",
+        "eclipse",
+        "netbeans64",
+        "netbeans",
+        "code",
+        "devenv",
+        "mvn",
+        "mvnw",
+        "gradle",
+        "gradlew"
+    };
+
     // Java版本路径配置
     private static readonly IReadOnlyDictionary<string, string> JavaVersionPaths = new Dictionary<string, string>
     {
@@ -146,16 +169,26 @@ public partial class MainWindow : Window
         }
         
         // 如果没有匹配的路径，返回默认信息
-        return string.IsNullOrEmpty(normalizedJavaHome) ? "未检测到Java" : javaHome;
+        return string.IsNullOrEmpty(normalizedJavaHome) ? "未检测到Java" : normalizedJavaHome;
     }
     
     // 切换Java版本
-    private void SwitchJavaVersion(string versionName)
+    private async Task SwitchJavaVersionAsync(string versionName)
     {
         try
         {
-            // 直接获取Java路径，不进行额外检查
-            string javaPath = JavaVersionPaths[versionName];
+            if (!JavaVersionPaths.TryGetValue(versionName, out string? javaPath))
+            {
+                MessageBox.Show($"未找到 {versionName} 的路径配置。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            EnvironmentPrecheckResult precheckResult = await RunEnvironmentPrecheckAsync(versionName, javaPath);
+            if (!precheckResult.IsSuccess)
+            {
+                MessageBox.Show(precheckResult.Message, precheckResult.Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
             
             // 立即更新JAVA_HOME
             Environment.SetEnvironmentVariable("JAVA_HOME", javaPath, EnvironmentVariableTarget.Machine);
@@ -181,15 +214,91 @@ public partial class MainWindow : Window
             MessageBox.Show($"切换失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+
+    private async Task<EnvironmentPrecheckResult> RunEnvironmentPrecheckAsync(string versionName, string javaPath)
+    {
+        string normalizedJavaPath = NormalizePath(javaPath);
+
+        if (!Directory.Exists(normalizedJavaPath))
+        {
+            return EnvironmentPrecheckResult.Fail(
+                "切换前预检失败",
+                $"目标 Java 安装目录不存在：{normalizedJavaPath}\n\n修复建议：检查路径配置是否正确，确认该 JDK/JRE 已安装。");
+        }
+
+        if (!Directory.EnumerateFileSystemEntries(normalizedJavaPath).Any())
+        {
+            return EnvironmentPrecheckResult.Fail(
+                "切换前预检失败",
+                $"目标 Java 安装目录为空：{normalizedJavaPath}\n\n修复建议：重新安装该版本 Java，或修正到实际安装目录。");
+        }
+
+        string javaExecutablePath = GetJavaExecutablePath(normalizedJavaPath);
+        if (!File.Exists(javaExecutablePath))
+        {
+            return EnvironmentPrecheckResult.Fail(
+                "切换前预检失败",
+                $"未找到可执行文件：{javaExecutablePath}\n\n修复建议：确认 {normalizedJavaPath}\\bin 下存在 java.exe。");
+        }
+
+        JavaCommandResult versionCheckResult = await ExecuteJavaVersionAsync(javaExecutablePath);
+        if (!versionCheckResult.IsSuccess)
+        {
+            return EnvironmentPrecheckResult.Fail(
+                "切换前预检失败",
+                $"无法在目标环境中执行 java -version：{javaExecutablePath}\n\n详细原因：{versionCheckResult.ErrorMessage}\n\n修复建议：确认该 java.exe 可正常启动，并检查是否被安全软件或权限策略阻止。");
+        }
+
+        string actualVersionName = MapJavaVersionWithPath(versionCheckResult.Version, normalizedJavaPath);
+        if (!string.Equals(actualVersionName, versionName, StringComparison.OrdinalIgnoreCase))
+        {
+            return EnvironmentPrecheckResult.Fail(
+                "切换前预检失败",
+                $"目标环境的版本校验未通过。\n\n预期版本：{versionName}\n实际识别：{actualVersionName}\njava -version 输出：\n{versionCheckResult.Output}\n修复建议：检查路径配置是否指向了错误的 JDK/JRE 目录。");
+        }
+
+        string currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? string.Empty;
+        List<string> javaPathsToReplace = GetJavaPathEntries(currentPath)
+            .Where(path => !ArePathsEqual(path, Path.Combine(normalizedJavaPath, "bin")))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        List<ProcessUsageInfo> occupiedProcesses = FindProcessesUsingPaths(javaPathsToReplace);
+        if (occupiedProcesses.Count > 0)
+        {
+            string occupiedSummary = string.Join(
+                "\n",
+                occupiedProcesses.Select(process => $"- {process.ProcessName} ({process.ExecutablePath})"));
+
+            return EnvironmentPrecheckResult.Fail(
+                "切换前预检失败",
+                $"检测到旧的 Java 路径仍被其他进程占用，已中止切换：\n{occupiedSummary}\n\n修复建议：先关闭这些进程，再重新执行切换。");
+        }
+
+        List<string> blockingToolProcesses = FindBlockingToolProcesses();
+        if (blockingToolProcesses.Count > 0)
+        {
+            string processSummary = string.Join("\n", blockingToolProcesses.Select(name => $"- {name}"));
+            return EnvironmentPrecheckResult.Fail(
+                "切换前预检失败",
+                $"检测到 IDE 或构建工具仍在运行：\n{processSummary}\n\n修复建议：请先关闭相关 IDE、Maven、Gradle 等工具，再执行版本切换。");
+        }
+
+        return EnvironmentPrecheckResult.Success();
+    }
     
     // 更新PATH，确保Java bin目录在PATH中
     private string UpdatePathWithJavaHome(string currentPath, string javaHome)
     {
         string javaBinPath = System.IO.Path.Combine(javaHome, "bin");
-        List<string> pathParts = new List<string>(currentPath.Split(';'));
+        List<string> pathParts = currentPath
+            .Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Trim())
+            .Where(part => !string.IsNullOrWhiteSpace(part))
+            .ToList();
         
         // 移除所有包含java、jdk、jre的路径
-        pathParts.RemoveAll(p => p.Contains("java") || p.Contains("jdk") || p.Contains("jre"));
+        pathParts.RemoveAll(IsJavaPathEntry);
         
         // 添加新的Java bin路径
         pathParts.Insert(0, javaBinPath);
@@ -217,34 +326,34 @@ public partial class MainWindow : Window
     }
     
     // 按钮点击事件
-    private void BtnJava7_Click(object sender, RoutedEventArgs e)
+    private async void BtnJava7_Click(object sender, RoutedEventArgs e)
     {
-        SwitchJavaVersion("Java7");
+        await SwitchJavaVersionAsync("Java7");
     }
     
-    private void BtnJava8_32_Click(object sender, RoutedEventArgs e)
+    private async void BtnJava8_32_Click(object sender, RoutedEventArgs e)
     {
-        SwitchJavaVersion("Java8_32");
+        await SwitchJavaVersionAsync("Java8_32");
     }
     
-    private void BtnJava8_Click(object sender, RoutedEventArgs e)
+    private async void BtnJava8_Click(object sender, RoutedEventArgs e)
     {
-        SwitchJavaVersion("Java8");
+        await SwitchJavaVersionAsync("Java8");
     }
     
-    private void BtnJava11_Click(object sender, RoutedEventArgs e)
+    private async void BtnJava11_Click(object sender, RoutedEventArgs e)
     {
-        SwitchJavaVersion("Java11");
+        await SwitchJavaVersionAsync("Java11");
     }
     
-    private void BtnJava17_Click(object sender, RoutedEventArgs e)
+    private async void BtnJava17_Click(object sender, RoutedEventArgs e)
     {
-        SwitchJavaVersion("Java17");
+        await SwitchJavaVersionAsync("Java17");
     }
     
-    private void BtnJava25_Click(object sender, RoutedEventArgs e)
+    private async void BtnJava25_Click(object sender, RoutedEventArgs e)
     {
-        SwitchJavaVersion("Java25");
+        await SwitchJavaVersionAsync("Java25");
     }
     
 
@@ -340,9 +449,185 @@ public partial class MainWindow : Window
         BtnJava17.Style = (Style)FindResource("PrimaryButtonStyle");
         BtnJava25.Style = (Style)FindResource("PrimaryButtonStyle");
     }
+
+    private static string GetJavaExecutablePath(string javaHome)
+    {
+        return Path.Combine(javaHome, "bin", "java.exe");
+    }
+
+    private static bool IsJavaPathEntry(string pathEntry)
+    {
+        string expandedPath = Environment.ExpandEnvironmentVariables(pathEntry.Trim().Trim('"'));
+        return expandedPath.Contains("java", StringComparison.OrdinalIgnoreCase)
+            || expandedPath.Contains("jdk", StringComparison.OrdinalIgnoreCase)
+            || expandedPath.Contains("jre", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<string> GetJavaPathEntries(string currentPath)
+    {
+        return currentPath
+            .Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => Environment.ExpandEnvironmentVariables(part.Trim().Trim('"')))
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Where(IsJavaPathEntry)
+            .ToList();
+    }
+
+    private static List<ProcessUsageInfo> FindProcessesUsingPaths(IEnumerable<string> targetPaths)
+    {
+        List<string> normalizedPaths = targetPaths
+            .Select(NormalizePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (normalizedPaths.Count == 0)
+        {
+            return new List<ProcessUsageInfo>();
+        }
+
+        List<ProcessUsageInfo> results = new List<ProcessUsageInfo>();
+
+        foreach (Process process in Process.GetProcesses())
+        {
+            try
+            {
+                string? executablePath = process.MainModule?.FileName;
+                if (string.IsNullOrWhiteSpace(executablePath))
+                {
+                    continue;
+                }
+
+                string normalizedExecutablePath = NormalizePath(executablePath);
+                if (!JavaProcessNames.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (normalizedPaths.Any(path => normalizedExecutablePath.StartsWith(path, StringComparison.OrdinalIgnoreCase)))
+                {
+                    results.Add(new ProcessUsageInfo(process.ProcessName, executablePath));
+                }
+            }
+            catch (Win32Exception)
+            {
+                // 某些系统进程无法访问 MainModule，忽略即可。
+            }
+            catch (InvalidOperationException)
+            {
+                // 进程可能在枚举期间退出，忽略即可。
+            }
+        }
+
+        return results
+            .DistinctBy(process => process.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<string> FindBlockingToolProcesses()
+    {
+        return Process.GetProcesses()
+            .Select(process =>
+            {
+                try
+                {
+                    return process.ProcessName;
+                }
+                catch
+                {
+                    return null;
+                }
+            })
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Where(name => IdeAndBuildToolProcessNames.Contains(name!, StringComparer.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .Cast<string>()
+            .ToList();
+    }
+
+    private static string NormalizePath(string path)
+    {
+        return Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'))).TrimEnd('\\');
+    }
+
+    private static bool ArePathsEqual(string left, string right)
+    {
+        return string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<JavaCommandResult> ExecuteJavaVersionAsync(string javaExecutablePath)
+    {
+        try
+        {
+            using Process process = new Process();
+            process.StartInfo.FileName = javaExecutablePath;
+            process.StartInfo.Arguments = "-version";
+            process.StartInfo.UseShellExecute = false;
+            process.StartInfo.RedirectStandardOutput = true;
+            process.StartInfo.RedirectStandardError = true;
+            process.StartInfo.CreateNoWindow = true;
+            process.Start();
+
+            string standardOutput = await process.StandardOutput.ReadToEndAsync();
+            string standardError = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            string combinedOutput = string.IsNullOrWhiteSpace(standardError) ? standardOutput : standardError;
+            if (string.IsNullOrWhiteSpace(combinedOutput))
+            {
+                combinedOutput = standardOutput;
+            }
+
+            if (process.ExitCode != 0)
+            {
+                return JavaCommandResult.Fail($"退出码：{process.ExitCode}", combinedOutput);
+            }
+
+            var match = System.Text.RegularExpressions.Regex.Match(combinedOutput, @"(?:java|openjdk) version ""([^""]+)""");
+            if (!match.Success)
+            {
+                return JavaCommandResult.Fail("输出格式不符合预期。", combinedOutput);
+            }
+
+            return JavaCommandResult.Success(match.Groups[1].Value, combinedOutput);
+        }
+        catch (Exception ex)
+        {
+            return JavaCommandResult.Fail(ex.Message, string.Empty);
+        }
+    }
 }
 
 // 本地方法定义
+internal sealed record EnvironmentPrecheckResult(bool IsSuccess, string Title, string Message)
+{
+    public static EnvironmentPrecheckResult Success()
+    {
+        return new EnvironmentPrecheckResult(true, string.Empty, string.Empty);
+    }
+
+    public static EnvironmentPrecheckResult Fail(string title, string message)
+    {
+        return new EnvironmentPrecheckResult(false, title, message);
+    }
+}
+
+internal sealed record JavaCommandResult(bool IsSuccess, string Version, string Output, string ErrorMessage)
+{
+    public static JavaCommandResult Success(string version, string output)
+    {
+        return new JavaCommandResult(true, version, output, string.Empty);
+    }
+
+    public static JavaCommandResult Fail(string errorMessage, string output)
+    {
+        return new JavaCommandResult(false, string.Empty, output, errorMessage);
+    }
+}
+
+internal sealed record ProcessUsageInfo(string ProcessName, string ExecutablePath);
+
 internal static class NativeMethods
 {
     [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Auto)]
