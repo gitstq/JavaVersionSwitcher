@@ -47,10 +47,10 @@ public partial class MainWindow : Window
     // Java版本路径配置
     private static readonly IReadOnlyDictionary<string, string> JavaVersionPaths = new Dictionary<string, string>
     {
-        {"Java7", "D:\\java\\jre-7u5--i586"},
-        {"Java8_32", "D:\\java\\jdk8_32"},
-        {"Java8", "D:\\java\\jdk-8u361"},
-        {"Java11", "D:\\java\\jdk-11.0.23"},
+        {"Java7", "D:\\java\\jdk-7"},
+        {"Java8_32", "D:\\java\\jdk-8_32"},
+        {"Java8", "D:\\java\\jdk-8"},
+        {"Java11", "D:\\java\\jdk-11.0.2"},
         {"Java17", "D:\\java\\jdk-17.0.12"},
         {"Java25", "D:\\java\\jdk-25.0.1"}
     };
