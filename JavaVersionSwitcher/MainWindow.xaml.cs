@@ -1,9 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -199,8 +197,25 @@ public partial class MainWindow : Window
             if (!precheckResult.IsSuccess)
             {
                 EndSwitchingUi();
-                MessageBox.Show(precheckResult.Message, precheckResult.Title, MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+
+                if (!precheckResult.CanForceContinue)
+                {
+                    MessageBox.Show(precheckResult.Message, precheckResult.Title, MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                MessageBoxResult forceContinue = MessageBox.Show(
+                    $"{precheckResult.Message}\n\n是否强制继续切换？\n选择“是”将忽略当前预检问题并继续执行切换。",
+                    precheckResult.Title,
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning);
+
+                if (forceContinue != MessageBoxResult.Yes)
+                {
+                    return;
+                }
+
+                BeginSwitchingUi(versionName);
             }
             
             await Task.Run(() =>
@@ -212,6 +227,9 @@ public partial class MainWindow : Window
                 string currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? string.Empty;
                 string newPath = UpdatePathWithJavaHome(currentPath, javaPath);
                 Environment.SetEnvironmentVariable("PATH", newPath, EnvironmentVariableTarget.Machine);
+
+                // 自动广播环境变量变更通知
+                RefreshEnvironmentVariables();
             });
             
             // 立即更新UI显示
@@ -238,14 +256,18 @@ public partial class MainWindow : Window
     {
         string normalizedJavaPath = NormalizePath(javaPath);
 
-        if (!Directory.Exists(normalizedJavaPath))
+        bool directoryExists = Directory.Exists(normalizedJavaPath);
+
+        if (!directoryExists)
         {
             return EnvironmentPrecheckResult.Fail(
                 "切换前预检失败",
                 $"目标 Java 安装目录不存在：{normalizedJavaPath}\n\n修复建议：检查路径配置是否正确，确认该 JDK/JRE 已安装。");
         }
 
-        if (!Directory.EnumerateFileSystemEntries(normalizedJavaPath).Any())
+        bool hasEntries = Directory.EnumerateFileSystemEntries(normalizedJavaPath).Any();
+
+        if (!hasEntries)
         {
             return EnvironmentPrecheckResult.Fail(
                 "切换前预检失败",
@@ -253,7 +275,9 @@ public partial class MainWindow : Window
         }
 
         string javaExecutablePath = GetJavaExecutablePath(normalizedJavaPath);
-        if (!File.Exists(javaExecutablePath))
+        bool javaExecutableExists = File.Exists(javaExecutablePath);
+
+        if (!javaExecutableExists)
         {
             return EnvironmentPrecheckResult.Fail(
                 "切换前预检失败",
@@ -276,22 +300,17 @@ public partial class MainWindow : Window
                 $"目标环境的版本校验未通过。\n\n预期版本：{versionName}\n实际识别：{actualVersionName}\njava -version 输出：\n{versionCheckResult.Output}\n修复建议：检查路径配置是否指向了错误的 JDK/JRE 目录。");
         }
 
-        string currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Machine) ?? string.Empty;
-        List<string> javaPathsToReplace = GetJavaPathEntries(currentPath)
-            .Where(path => !ArePathsEqual(path, Path.Combine(normalizedJavaPath, "bin")))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        List<ProcessUsageInfo> occupiedProcesses = FindProcessesUsingPaths(javaPathsToReplace);
-        if (occupiedProcesses.Count > 0)
+        List<RunningProcessInfo> runningJavaProcesses = FindRunningJavaProcesses();
+        if (runningJavaProcesses.Count > 0)
         {
             string occupiedSummary = string.Join(
                 "\n",
-                occupiedProcesses.Select(process => $"- {process.ProcessName} ({process.ExecutablePath})"));
+                runningJavaProcesses.Select(process => $"- {process.ProcessName} (PID: {process.ProcessId})"));
 
             return EnvironmentPrecheckResult.Fail(
                 "切换前预检失败",
-                $"检测到旧的 Java 路径仍被其他进程占用，已中止切换：\n{occupiedSummary}\n\n修复建议：先关闭这些进程，再重新执行切换。");
+                $"检测到 Java 相关进程仍在运行，已中止切换：\n{occupiedSummary}\n\n修复建议：先关闭这些 Java 进程，再重新执行切换。",
+                canForceContinue: true);
         }
 
         List<string> blockingToolProcesses = FindBlockingToolProcesses();
@@ -300,7 +319,8 @@ public partial class MainWindow : Window
             string processSummary = string.Join("\n", blockingToolProcesses.Select(name => $"- {name}"));
             return EnvironmentPrecheckResult.Fail(
                 "切换前预检失败",
-                $"检测到 IDE 或构建工具仍在运行：\n{processSummary}\n\n修复建议：请先关闭相关 IDE、Maven、Gradle 等工具，再执行版本切换。");
+                $"检测到 IDE 或构建工具仍在运行：\n{processSummary}\n\n修复建议：请先关闭相关 IDE、Maven、Gradle 等工具，再执行版本切换。",
+                canForceContinue: true);
         }
 
         return EnvironmentPrecheckResult.Success();
@@ -451,14 +471,6 @@ public partial class MainWindow : Window
         await SwitchJavaVersionAsync("Java25");
     }
 
-    private void BtnBroadcastEnvironment_Click(object sender, RoutedEventArgs e)
-    {
-        RefreshEnvironmentVariables();
-        MessageBox.Show("已广播环境变量变更通知。", "操作成功", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-    
-
-    
     // 将java -version输出映射为显示名称，考虑JAVA_HOME路径
     private string MapJavaVersionWithPath(string rawVersion, string javaHome)
     {
@@ -559,7 +571,6 @@ public partial class MainWindow : Window
         BtnJava11.IsEnabled = isEnabled;
         BtnJava17.IsEnabled = isEnabled;
         BtnJava25.IsEnabled = isEnabled;
-        BtnBroadcastEnvironment.IsEnabled = isEnabled;
     }
 
     private static string GetJavaExecutablePath(string javaHome)
@@ -575,64 +586,29 @@ public partial class MainWindow : Window
             || expandedPath.Contains("jre", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static List<string> GetJavaPathEntries(string currentPath)
+    private static List<RunningProcessInfo> FindRunningJavaProcesses()
     {
-        return currentPath
-            .Split(';', StringSplitOptions.RemoveEmptyEntries)
-            .Select(part => Environment.ExpandEnvironmentVariables(part.Trim().Trim('"')))
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Where(IsJavaPathEntry)
-            .ToList();
-    }
+        List<RunningProcessInfo> results = new List<RunningProcessInfo>();
 
-    private static List<ProcessUsageInfo> FindProcessesUsingPaths(IEnumerable<string> targetPaths)
-    {
-        List<string> normalizedPaths = targetPaths
-            .Select(NormalizePath)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (normalizedPaths.Count == 0)
+        foreach (string processName in JavaProcessNames)
         {
-            return new List<ProcessUsageInfo>();
-        }
-
-        List<ProcessUsageInfo> results = new List<ProcessUsageInfo>();
-
-        foreach (Process process in Process.GetProcesses())
-        {
-            try
+            foreach (Process process in Process.GetProcessesByName(processName))
             {
-                string? executablePath = process.MainModule?.FileName;
-                if (string.IsNullOrWhiteSpace(executablePath))
+                try
                 {
-                    continue;
+                    results.Add(new RunningProcessInfo(process.ProcessName, process.Id));
                 }
-
-                string normalizedExecutablePath = NormalizePath(executablePath);
-                if (!JavaProcessNames.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase))
+                catch (InvalidOperationException)
                 {
-                    continue;
+                    // 进程可能在枚举期间退出，忽略即可。
                 }
-
-                if (normalizedPaths.Any(path => normalizedExecutablePath.StartsWith(path, StringComparison.OrdinalIgnoreCase)))
-                {
-                    results.Add(new ProcessUsageInfo(process.ProcessName, executablePath));
-                }
-            }
-            catch (Win32Exception)
-            {
-                // 某些系统进程无法访问 MainModule，忽略即可。
-            }
-            catch (InvalidOperationException)
-            {
-                // 进程可能在枚举期间退出，忽略即可。
             }
         }
 
         return results
-            .DistinctBy(process => process.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .DistinctBy(process => process.ProcessId)
+            .OrderBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(process => process.ProcessId)
             .ToList();
     }
 
@@ -661,11 +637,6 @@ public partial class MainWindow : Window
     private static string NormalizePath(string path)
     {
         return Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'))).TrimEnd('\\');
-    }
-
-    private static bool ArePathsEqual(string left, string right)
-    {
-        return string.Equals(NormalizePath(left), NormalizePath(right), StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<JavaCommandResult> ExecuteJavaVersionAsync(string javaExecutablePath)
@@ -712,16 +683,16 @@ public partial class MainWindow : Window
 }
 
 // 本地方法定义
-internal sealed record EnvironmentPrecheckResult(bool IsSuccess, string Title, string Message)
+internal sealed record EnvironmentPrecheckResult(bool IsSuccess, string Title, string Message, bool CanForceContinue)
 {
     public static EnvironmentPrecheckResult Success()
     {
-        return new EnvironmentPrecheckResult(true, string.Empty, string.Empty);
+        return new EnvironmentPrecheckResult(true, string.Empty, string.Empty, false);
     }
 
-    public static EnvironmentPrecheckResult Fail(string title, string message)
+    public static EnvironmentPrecheckResult Fail(string title, string message, bool canForceContinue = false)
     {
-        return new EnvironmentPrecheckResult(false, title, message);
+        return new EnvironmentPrecheckResult(false, title, message, canForceContinue);
     }
 }
 
@@ -738,7 +709,7 @@ internal sealed record JavaCommandResult(bool IsSuccess, string Version, string 
     }
 }
 
-internal sealed record ProcessUsageInfo(string ProcessName, string ExecutablePath);
+internal sealed record RunningProcessInfo(string ProcessName, int ProcessId);
 
 internal static class NativeMethods
 {
